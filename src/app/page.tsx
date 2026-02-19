@@ -17,14 +17,48 @@ type CaptionWithImage = CaptionRow & {
 };
 
 const PAGE_SIZE = 50;
+const VOTE_STORAGE_KEY_PREFIX = "caption_votes_by_user";
+
+const getVoteStorageKey = (userId: string) =>
+  `${VOTE_STORAGE_KEY_PREFIX}:${userId}`;
+
+const loadVotesFromStorage = (userId: string): Record<string, 1 | -1> => {
+  try {
+    const raw = window.localStorage.getItem(getVoteStorageKey(userId));
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const next: Record<string, 1 | -1> = {};
+    Object.entries(parsed).forEach(([captionId, vote]) => {
+      if (vote === 1 || vote === -1) {
+        next[captionId] = vote;
+      }
+    });
+    return next;
+  } catch {
+    return {};
+  }
+};
+
+const saveVotesToStorage = (
+  userId: string,
+  votes: Record<string, 1 | -1>,
+) => {
+  try {
+    window.localStorage.setItem(getVoteStorageKey(userId), JSON.stringify(votes));
+  } catch {
+    // Ignore storage failures.
+  }
+};
 
 export default function Home() {
   const [authStatus, setAuthStatus] = useState<AuthStatus>("loading");
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [captions, setCaptions] = useState<CaptionWithImage[]>([]);
   const [votesByCaption, setVotesByCaption] = useState<Record<string, 1 | -1>>(
     {},
   );
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [voteLoadMessage, setVoteLoadMessage] = useState<string | null>(null);
   const [isLoadingCaptions, setIsLoadingCaptions] = useState(false);
   const [isLoadingVotes, setIsLoadingVotes] = useState(false);
   const [page, setPage] = useState(1);
@@ -38,8 +72,10 @@ export default function Home() {
       .then(({ data }) => {
         if (!isMounted) return;
         if (data.session) {
+          setCurrentUserId(data.session.user.id);
           setAuthStatus("signedIn");
         } else {
+          setCurrentUserId(null);
           setAuthStatus("signedOut");
         }
       })
@@ -54,8 +90,11 @@ export default function Home() {
     } = supabaseClient.auth.onAuthStateChange((_event, session) => {
       if (!isMounted) return;
       if (session) {
+        setCurrentUserId(session.user.id);
         setAuthStatus("signedIn");
       } else {
+        setCurrentUserId(null);
+        setVoteLoadMessage(null);
         setAuthStatus("signedOut");
         setCaptions([]);
         setVotesByCaption({});
@@ -129,8 +168,13 @@ export default function Home() {
   }, [authStatus]);
 
   useEffect(() => {
-    if (authStatus !== "signedIn" || captions.length === 0) return;
-    const captionIds = captions.map((caption) => caption.id);
+    if (authStatus !== "signedIn" || !currentUserId) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setVotesByCaption(loadVotesFromStorage(currentUserId));
+  }, [authStatus, currentUserId]);
+
+  useEffect(() => {
+    if (authStatus !== "signedIn" || !currentUserId) return;
 
     const loadVotes = async () => {
       setIsLoadingVotes(true);
@@ -138,9 +182,10 @@ export default function Home() {
         data: { user },
         error: userError,
       } = await supabaseClient.auth.getUser();
+
       if (userError || !user) {
-        setErrorMessage(
-          userError?.message ?? "Your session expired. Please sign in again.",
+        setVoteLoadMessage(
+          `Could not load previous votes: ${userError?.message ?? "Not authenticated."}`,
         );
         setIsLoadingVotes(false);
         return;
@@ -149,11 +194,12 @@ export default function Home() {
       const { data, error } = await supabaseClient
         .from("caption_votes")
         .select("caption_id, vote_value")
-        .eq("profile_id", user.id)
-        .in("caption_id", captionIds);
+        .eq("profile_id", user.id);
 
       if (error) {
-        setErrorMessage(`Could not load previous votes: ${error.message}`);
+        setVoteLoadMessage(
+          `Could not load previous votes from database: ${error.message}`,
+        );
         setIsLoadingVotes(false);
         return;
       }
@@ -168,12 +214,17 @@ export default function Home() {
         nextVotes[vote.caption_id] = vote.vote_value;
       });
 
-      setVotesByCaption((prev) => ({ ...prev, ...nextVotes }));
+      setVotesByCaption((prev) => {
+        const merged = { ...prev, ...nextVotes };
+        saveVotesToStorage(currentUserId, merged);
+        return merged;
+      });
+      setVoteLoadMessage(null);
       setIsLoadingVotes(false);
     };
 
     void loadVotes();
-  }, [authStatus, captions]);
+  }, [authStatus, currentUserId]);
 
   const handleVote = async (captionId: string, voteValue: 1 | -1) => {
     if (authStatus !== "signedIn") return;
@@ -185,6 +236,7 @@ export default function Home() {
       error: userError,
     } = await supabaseClient.auth.getUser();
     const sessionUserId = user?.id;
+
     if (userError || !sessionUserId) {
       setErrorMessage(
         userError?.message ?? "Your session expired. Please sign in again.",
@@ -221,10 +273,14 @@ export default function Home() {
       }
     }
 
-    setVotesByCaption((prev) => ({
-      ...prev,
-      [captionId]: voteValue,
-    }));
+    setVotesByCaption((prev) => {
+      const merged = {
+        ...prev,
+        [captionId]: voteValue,
+      };
+      saveVotesToStorage(sessionUserId, merged);
+      return merged;
+    });
   };
 
   return (
@@ -298,6 +354,12 @@ export default function Home() {
           <div className="rounded-2xl border border-red-200 bg-white p-6 shadow-sm">
             <h2 className="text-lg font-semibold">Something went wrong</h2>
             <p className="mt-3 text-sm text-red-600">{errorMessage}</p>
+          </div>
+        )}
+
+        {authStatus === "signedIn" && voteLoadMessage && (
+          <div className="mb-6 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+            {voteLoadMessage}
           </div>
         )}
 
