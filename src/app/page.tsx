@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { supabaseClient } from "@/lib/supabaseClient";
 import type { Database } from "@/types/supabase";
+import TopNav from "@/components/TopNav";
 
 type AuthStatus = "loading" | "signedOut" | "signedIn";
 
@@ -286,23 +287,12 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-zinc-50 px-6 py-12 text-zinc-950">
       <main className="mx-auto max-w-6xl">
-        <header className="mb-10 flex flex-col gap-3">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <h1 className="text-3xl font-semibold tracking-tight">
-              Caption Ratings
-            </h1>
-            {authStatus === "signedIn" && (
-              <div className="flex items-center gap-2">
-                <button
-                  className="inline-flex items-center justify-center rounded-full border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-100"
-                  onClick={handleSignOut}
-                  type="button"
-                >
-                  Sign out
-                </button>
-              </div>
-            )}
-          </div>
+        <TopNav authStatus={authStatus} onSignOut={handleSignOut} />
+
+        <header className="mb-8 flex flex-col gap-3">
+          <h1 className="text-3xl font-semibold tracking-tight">
+            Caption Ratings
+          </h1>
           {authStatus === "signedIn" && (
             <div className="text-sm text-zinc-600">
               {isLoadingCaptions ? (
