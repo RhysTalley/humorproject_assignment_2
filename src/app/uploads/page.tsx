@@ -79,6 +79,8 @@ export default function UploadsPage() {
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [isLoadingImages, setIsLoadingImages] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [deletingImageId, setDeletingImageId] = useState<string | null>(null);
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -185,7 +187,7 @@ export default function UploadsPage() {
 
     if (!allowedContentTypes.has(file.type)) {
       setErrorMessage(
-        "Unsupported file type. Please upload a JPG, PNG, WEBP, GIF, or HEIC image.",
+        "Unsupported file type. Please upload a JPEG, JPG, PNG, WEBP, GIF, or HEIC image.",
       );
       event.target.value = "";
       return;
@@ -272,6 +274,32 @@ export default function UploadsPage() {
     }
   };
 
+  const handleDeleteImage = async (imageId: string) => {
+    if (authStatus !== "signedIn") return;
+    setPendingDeleteId(imageId);
+  };
+
+  const confirmDeleteImage = async () => {
+    if (!pendingDeleteId || authStatus !== "signedIn") return;
+
+    setErrorMessage(null);
+    setDeletingImageId(pendingDeleteId);
+    const { error } = await supabaseClient
+      .from("images")
+      .delete()
+      .eq("id", pendingDeleteId);
+    if (error) {
+      setErrorMessage(`Could not delete image: ${error.message}`);
+      setDeletingImageId(null);
+      setPendingDeleteId(null);
+      return;
+    }
+
+    setImages((prev) => prev.filter((image) => image.id !== pendingDeleteId));
+    setDeletingImageId(null);
+    setPendingDeleteId(null);
+  };
+
   return (
     <div className="min-h-screen bg-zinc-50 px-6 py-12 text-zinc-950">
       <main className="mx-auto max-w-6xl">
@@ -316,7 +344,7 @@ export default function UploadsPage() {
               <div>
                 <h2 className="text-lg font-semibold">Upload a new image</h2>
                 <p className="mt-1 text-sm text-zinc-600">
-                  Supported types: JPG, PNG, WEBP, GIF, HEIC.
+                  Supported types: JPEG, JPG, PNG, WEBP, GIF, HEIC.
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-3">
@@ -363,29 +391,73 @@ export default function UploadsPage() {
             ) : (
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 {images.map((image) => (
-                  <Link
+                  <article
                     key={image.id}
-                    href={`/uploads/${image.id}`}
                     className="group overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm transition hover:-translate-y-1 hover:shadow-md"
                   >
-                    <div className="aspect-[4/3] w-full overflow-hidden bg-zinc-100">
-                      {image.url ? (
-                        <img
-                          src={image.url}
-                          alt="Uploaded image"
-                          className="h-full w-full object-cover transition duration-200 group-hover:scale-[1.02]"
-                        />
-                      ) : (
-                        <div className="flex h-full w-full items-center justify-center text-sm text-zinc-400">
-                          No image available
+                    <div className="relative">
+                      <Link href={`/uploads/${image.id}`} className="block">
+                        <div className="aspect-[4/3] w-full overflow-hidden bg-zinc-100">
+                          {image.url ? (
+                            <img
+                              src={image.url}
+                              alt="Uploaded image"
+                              className="h-full w-full object-cover transition duration-200 group-hover:scale-[1.02]"
+                            />
+                          ) : (
+                            <div className="flex h-full w-full items-center justify-center text-sm text-zinc-400">
+                              No image available
+                            </div>
+                          )}
                         </div>
-                      )}
+                      </Link>
+                      <button
+                        className="absolute right-3 top-3 inline-flex items-center justify-center rounded-full border border-rose-300 bg-white/90 px-3 py-1.5 text-xs font-semibold text-rose-700 shadow-sm hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60"
+                        onClick={() => handleDeleteImage(image.id)}
+                        type="button"
+                        disabled={deletingImageId === image.id}
+                      >
+                        {deletingImageId === image.id ? "Deleting..." : "Delete"}
+                      </button>
                     </div>
-                  </Link>
+                  </article>
                 ))}
               </div>
             )}
           </section>
+        )}
+
+        {pendingDeleteId && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+            <div className="w-full max-w-md rounded-2xl border border-zinc-200 bg-white p-6 shadow-xl">
+              <h2 className="text-lg font-semibold text-zinc-900">
+                Delete this image?
+              </h2>
+              <p className="mt-2 text-sm text-zinc-600">
+                This will permanently remove the image and its captions.
+              </p>
+              <div className="mt-6 flex items-center justify-end gap-3">
+                <button
+                  className="inline-flex items-center justify-center rounded-full border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-100"
+                  onClick={() => setPendingDeleteId(null)}
+                  type="button"
+                  disabled={deletingImageId === pendingDeleteId}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="inline-flex items-center justify-center rounded-full border border-rose-300 bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60"
+                  onClick={confirmDeleteImage}
+                  type="button"
+                  disabled={deletingImageId === pendingDeleteId}
+                >
+                  {deletingImageId === pendingDeleteId
+                    ? "Deleting..."
+                    : "Delete"}
+                </button>
+              </div>
+            </div>
+          </div>
         )}
       </main>
     </div>
