@@ -72,6 +72,8 @@ export default function Home() {
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [captions, setCaptions] = useState<CaptionWithImage[]>([]);
   const [filter, setFilter] = useState<CaptionFilter>("popular_week");
+  const [lastPopularFilter, setLastPopularFilter] =
+    useState<CaptionFilter>("popular_week");
   const [votesByCaption, setVotesByCaption] = useState<Record<string, 1 | -1>>(
     {},
   );
@@ -146,6 +148,13 @@ export default function Home() {
         stored === "hot"
       ) {
         setFilter(stored);
+        if (
+          stored === "popular_all" ||
+          stored === "popular_month" ||
+          stored === "popular_week"
+        ) {
+          setLastPopularFilter(stored);
+        }
       }
     } catch {
       // Ignore storage failures.
@@ -157,6 +166,16 @@ export default function Home() {
       window.localStorage.setItem(FILTER_STORAGE_KEY, filter);
     } catch {
       // Ignore storage failures.
+    }
+  }, [filter]);
+
+  useEffect(() => {
+    if (
+      filter === "popular_all" ||
+      filter === "popular_month" ||
+      filter === "popular_week"
+    ) {
+      setLastPopularFilter(filter);
     }
   }, [filter]);
 
@@ -440,7 +459,7 @@ export default function Home() {
                   <button
                     className="text-sm font-medium"
                     onClick={() => {
-                      setFilter("popular_week");
+                      setFilter(lastPopularFilter);
                       setPage(1);
                       setHasMore(true);
                       setCaptions([]);
