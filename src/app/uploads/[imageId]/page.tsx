@@ -45,6 +45,14 @@ const saveVotesToStorage = (
   }
 };
 
+const normalizeLikeCount = (value: number | string | null) => {
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    return Number.isNaN(parsed) ? 0 : parsed;
+  }
+  return value ?? 0;
+};
+
 async function fetchJson<T>(input: RequestInfo, init?: RequestInit) {
   const response = await fetch(input, init);
   if (!response.ok) {
@@ -256,6 +264,7 @@ export default function UploadCaptionsPage() {
     if (authStatus !== "signedIn") return;
     setErrorMessage(null);
     if (votesByCaption[captionId] === voteValue) return;
+    const previousVote = votesByCaption[captionId] ?? 0;
 
     const {
       data: { user },
@@ -307,6 +316,20 @@ export default function UploadCaptionsPage() {
       saveVotesToStorage(sessionUserId, merged);
       return merged;
     });
+
+    const delta = voteValue - previousVote;
+    if (delta !== 0) {
+      setCaptions((prev) =>
+        prev.map((caption) => {
+          if (caption.id !== captionId) return caption;
+          const currentCount = normalizeLikeCount(caption.like_count ?? 0);
+          return {
+            ...caption,
+            like_count: currentCount + delta,
+          };
+        }),
+      );
+    }
   };
 
   const handleGenerateMore = async () => {
@@ -514,6 +537,12 @@ export default function UploadCaptionsPage() {
                             Downvote
                           </button>
                         </div>
+                        <p className="text-xs text-zinc-500">
+                          {normalizeLikeCount(caption.like_count ?? 0)} upvote
+                          {normalizeLikeCount(caption.like_count ?? 0) === 1
+                            ? ""
+                            : "s"}
+                        </p>
                         {isLoadingVotes && (
                           <p className="text-xs text-zinc-400">
                             Loading your previous votes...

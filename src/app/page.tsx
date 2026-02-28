@@ -21,8 +21,7 @@ type CaptionFilter =
   | "popular_all"
   | "popular_month"
   | "popular_week"
-  | "recent"
-  | "hot";
+  | "recent";
 
 const PAGE_SIZE = 50;
 const VOTE_STORAGE_KEY_PREFIX = "caption_votes_by_user";
@@ -59,6 +58,14 @@ const saveVotesToStorage = (
   }
 };
 
+const normalizeLikeCount = (value: number | string | null) => {
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    return Number.isNaN(parsed) ? 0 : parsed;
+  }
+  return value ?? 0;
+};
+
 const toUtcIso = (date: Date) => date.toISOString();
 
 const getUtcThirtyDaysAgo = (date: Date) =>
@@ -76,6 +83,9 @@ export default function Home() {
     useState<CaptionFilter>("popular_week");
   const [votesByCaption, setVotesByCaption] = useState<Record<string, 1 | -1>>(
     {},
+  );
+  const [failedImageIds, setFailedImageIds] = useState<Set<string>>(
+    () => new Set(),
   );
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [voteLoadMessage, setVoteLoadMessage] = useState<string | null>(null);
@@ -144,8 +154,7 @@ export default function Home() {
         stored === "popular_all" ||
         stored === "popular_month" ||
         stored === "popular_week" ||
-        stored === "recent" ||
-        stored === "hot"
+        stored === "recent"
       ) {
         setFilter(stored);
         if (
@@ -226,63 +235,10 @@ export default function Home() {
     const weekStart = getUtcSevenDaysAgo(now);
     const monthStart = getUtcThirtyDaysAgo(now);
     const threeDaysAgo = new Date(now.getTime() - 3 * 24 * 60 * 60 * 1000);
-    const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-
-    if (filter === "hot") {
-      const { data: recentVotes, error: voteError } = await supabaseClient
-        .from("caption_votes")
-        .select("caption_id")
-        .eq("vote_value", 1)
-        .gte("created_datetime_utc", toUtcIso(oneDayAgo));
-
-      if (voteError) {
-        setErrorMessage(voteError.message);
-        setIsLoadingCaptions(false);
-        return;
-      }
-
-      const uniqueIds = Array.from(
-        new Set((recentVotes ?? []).map((vote) => vote.caption_id)),
-      );
-
-      if (uniqueIds.length === 0) {
-        if (reset) {
-          setCaptions([]);
-        }
-        setHasMore(false);
-        setIsLoadingCaptions(false);
-        return;
-      }
-
-      const { data, error } = await supabaseClient
-        .from("captions")
-        .select(
-          "id, content, created_datetime_utc, image_id, images!inner ( id, url, image_description )",
-        )
-        .not("content", "is", null)
-        .not("images.url", "is", null)
-        .gte("created_datetime_utc", toUtcIso(threeDaysAgo))
-        .in("id", uniqueIds)
-        .order("like_count", { ascending: false })
-        .range(start, end);
-
-      if (error) {
-        setErrorMessage(error.message);
-        setIsLoadingCaptions(false);
-        return;
-      }
-
-      const fetched = (data ?? []) as CaptionWithImage[];
-      setCaptions((prev) => (reset ? fetched : [...prev, ...fetched]));
-      setHasMore(fetched.length === PAGE_SIZE);
-      setIsLoadingCaptions(false);
-      return;
-    }
-
     let query = supabaseClient
       .from("captions")
       .select(
-        "id, content, created_datetime_utc, image_id, images!inner ( id, url, image_description )",
+        "id, content, created_datetime_utc, like_count, image_id, images!inner ( id, url, image_description )",
       )
       .not("content", "is", null)
       .not("images.url", "is", null);
@@ -384,6 +340,7 @@ export default function Home() {
     if (authStatus !== "signedIn") return;
     setErrorMessage(null);
     if (votesByCaption[captionId] === voteValue) return;
+    const previousVote = votesByCaption[captionId] ?? 0;
 
     const {
       data: { user },
@@ -435,6 +392,20 @@ export default function Home() {
       saveVotesToStorage(sessionUserId, merged);
       return merged;
     });
+
+    const delta = voteValue - previousVote;
+    if (delta !== 0) {
+      setCaptions((prev) =>
+        prev.map((caption) => {
+          if (caption.id !== captionId) return caption;
+          const currentCount = normalizeLikeCount(caption.like_count ?? 0);
+          return {
+            ...caption,
+            like_count: currentCount + delta,
+          };
+        }),
+      );
+    }
   };
 
   return (
@@ -559,22 +530,6 @@ export default function Home() {
               >
                 Most recent
               </button>
-              <button
-                className={`rounded-full border px-4 py-2 ${
-                  filter === "hot"
-                    ? "border-blue-500 bg-blue-50 text-blue-700"
-                    : "border-zinc-300 text-zinc-700 hover:bg-zinc-100"
-                }`}
-                onClick={() => {
-                  setFilter("hot");
-                  setPage(1);
-                  setHasMore(true);
-                  setCaptions([]);
-                }}
-                type="button"
-              >
-                Hot
-              </button>
             </div>
           </div>
           {authStatus === "signedIn" && (
@@ -647,7 +602,9 @@ export default function Home() {
         ) : (
           authStatus === "signedIn" && (
             <section className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-              {captions.map((caption) => {
+              {captions
+                .filter((caption) => !failedImageIds.has(caption.id))
+                .map((caption) => {
                 const vote = votesByCaption[caption.id] ?? 0;
                 const isUpvoted = vote === 1;
                 const isDownvoted = vote === -1;
@@ -673,6 +630,13 @@ export default function Home() {
                             alt={caption.images.image_description ?? "Caption image"}
                             className="relative h-full w-full object-contain"
                             loading="lazy"
+                            onError={() => {
+                              setFailedImageIds((prev) => {
+                                const next = new Set(prev);
+                                next.add(caption.id);
+                                return next;
+                              });
+                            }}
                           />
                         </>
                       ) : (
@@ -716,6 +680,12 @@ export default function Home() {
                           Downvote
                         </button>
                       </div>
+                      <p className="text-xs text-zinc-500">
+                        {normalizeLikeCount(caption.like_count ?? 0)} upvote
+                        {normalizeLikeCount(caption.like_count ?? 0) === 1
+                          ? ""
+                          : "s"}
+                      </p>
                       {isLoadingVotes && (
                         <p className="text-xs text-zinc-400">
                           Loading your previous votes...
