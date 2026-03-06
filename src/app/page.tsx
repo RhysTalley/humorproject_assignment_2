@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "next/navigation";
 import TopNav from "@/components/TopNav";
 import { supabaseClient } from "@/lib/supabaseClient";
 import type { Database } from "@/types/supabase";
@@ -49,13 +48,18 @@ export default function Home() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [hoveredPoint, setHoveredPoint] = useState<HoveredPoint | null>(null);
   const [dataMode, setDataMode] = useState<DataMode>("fast");
-  const searchParams = useSearchParams();
-  const authWarning =
-    searchParams.get("auth") === "not_superadmin"
-      ? "You are not a superadmin, so admin access was denied."
-      : null;
+  const [authWarning, setAuthWarning] = useState<string | null>(null);
   const chartRef = useRef<HTMLDivElement | null>(null);
   const [chartSize, setChartSize] = useState({ width: 900, height: 560 });
+
+  useEffect(() => {
+    const authParam = new URLSearchParams(window.location.search).get("auth");
+    if (authParam === "not_superadmin") {
+      setAuthWarning("You are not a superadmin, so admin access was denied.");
+      return;
+    }
+    setAuthWarning(null);
+  }, []);
 
   useEffect(() => {
     const resizeObserver = new ResizeObserver((entries) => {
@@ -294,13 +298,23 @@ export default function Home() {
   }, [stats]);
 
   const handlePointMove = (
-    event: React.MouseEvent<HTMLButtonElement>,
+    event:
+      | React.MouseEvent<HTMLButtonElement>
+      | React.FocusEvent<HTMLButtonElement>,
     point: ImageStat,
   ) => {
     const bounds = chartRef.current?.getBoundingClientRect();
     if (!bounds) return;
-    const x = clamp(event.clientX - bounds.left, 0, bounds.width);
-    const y = clamp(event.clientY - bounds.top, 0, bounds.height);
+    const hasMouseCoords = "clientX" in event && "clientY" in event;
+    const fallbackBounds = event.currentTarget.getBoundingClientRect();
+    const rawX = hasMouseCoords
+      ? event.clientX
+      : fallbackBounds.left + fallbackBounds.width / 2;
+    const rawY = hasMouseCoords
+      ? event.clientY
+      : fallbackBounds.top + fallbackBounds.height / 2;
+    const x = clamp(rawX - bounds.left, 0, bounds.width);
+    const y = clamp(rawY - bounds.top, 0, bounds.height);
     setHoveredPoint({ point, x, y });
   };
 

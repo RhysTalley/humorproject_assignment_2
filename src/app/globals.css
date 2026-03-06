@@ -9,6 +9,8 @@
   --muted: #94a3b8;
   --accent: #22d3ee;
   --accent-strong: #38bdf8;
+  --font-geist-sans: "Figtree", "Manrope", "Segoe UI", sans-serif;
+  --font-geist-mono: "JetBrains Mono", "SFMono-Regular", Menlo, monospace;
 }
 
 @theme inline {
