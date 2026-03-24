@@ -72,6 +72,7 @@ type SelectOption = {
 };
 
 const PAGE_SIZE = 25;
+const FORCED_HUMOR_FLAVOR_ID = 35;
 
 const allowedContentTypes = new Set([
   "image/jpeg",
@@ -687,11 +688,32 @@ function buildPayload(
 
 async function fetchJson<T>(input: RequestInfo, init?: RequestInit) {
   const response = await fetch(input, init);
+  const contentType = response.headers.get("content-type") ?? "";
+  const responseText = await response.text();
+
   if (!response.ok) {
-    const text = await response.text();
-    throw new Error(text || `Request failed with status ${response.status}`);
+    throw new Error(
+      responseText ||
+        `Request failed with status ${response.status} (${contentType || "unknown content type"})`,
+    );
   }
-  return (await response.json()) as T;
+
+  if (!responseText) {
+    throw new Error("Expected a JSON response body, but the response was empty.");
+  }
+
+  if (!contentType.toLowerCase().includes("application/json")) {
+    throw new Error(
+      `Expected JSON but received ${contentType || "unknown content type"}: ${responseText}`,
+    );
+  }
+
+  try {
+    return JSON.parse(responseText) as T;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Invalid JSON response: ${message}. Raw body: ${responseText}`);
+  }
 }
 
 const getCaptionCountFromResponse = (response: unknown) => {
@@ -719,9 +741,13 @@ const generateCaptionsBatch = async (
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ imageId }),
+        body: JSON.stringify({
+          imageId,
+          humorFlavorId: FORCED_HUMOR_FLAVOR_ID,
+        }),
       },
     );
+
     responses.push(response);
     totalGenerated += getCaptionCountFromResponse(response);
     attempts += 1;
